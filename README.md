@@ -9,9 +9,9 @@ Full-stack 3D vision: COLMAP + 2DGS | threestudio/SDS | Utah Teapot
 git clone https://github.com/lwj16/CVFinal-Task1.git
 cd CVFinal-Task1
 
-# 2. Download models from Google Drive
+# 2. Download models from Google Drive:
 #    https://drive.google.com/drive/folders/1ZMRnu4ozgmy-LEtr2p2Ti3O2L5LiCT7J?usp=sharing
-#    Extract to models/:
+#    Place all files in models/:
 #      models/lego.ply        (29 MB)
 #      models/vase.obj        (8.1 MB)
 #      models/vase_texture.jpg (0.9 MB)
@@ -75,6 +75,12 @@ python scripts/fusion_v16.py
 | B | threestudio SDS | Text prompt | `models/vase.obj` |
 | C | Utah Teapot | Classic 3D model | `models/teapot.obj` |
 | Background | 2DGS | Mip-NeRF 360 (bonsai) | `models/bonsai.ply` |
+
+## Downloads
+
+**Google Drive**: [models, report, video](https://drive.google.com/drive/folders/1ZMRnu4ozgmy-LEtr2p2Ti3O2L5LiCT7J?usp=sharing)
+
+**GitHub**: [https://github.com/lwj16/CVFinal-Task1](https://github.com/lwj16/CVFinal-Task1)
 
 ## Fusion Approach
 
