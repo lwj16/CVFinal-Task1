@@ -78,7 +78,7 @@ python scripts/fusion_v16.py
 
 ## Downloads
 
-**Google Drive**: [models, report, video](https://drive.google.com/drive/folders/1ZMRnu4ozgmy-LEtr2p2Ti3O2L5LiCT7J?usp=sharing)
+**Google Drive**: [models, video](https://drive.google.com/drive/folders/1fe2u3sDFUE3mYHjnMlMTDY8bEmTdw6xb?usp=drive_link)
 
 **GitHub**: [https://github.com/lwj16/CVFinal-Task1](https://github.com/lwj16/CVFinal-Task1)
 
