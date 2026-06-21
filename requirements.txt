@@ -1,0 +1,78 @@
+# ============================================================
+# Project-1: Complete Requirements (3 conda environments)
+# ============================================================
+
+# ---- Common base ----
+# python==3.8.18
+# torch==2.0.0+cu118
+torchvision==0.15.0+cu118
+ninja
+plyfile
+opencv-python
+matplotlib
+numpy
+scipy
+pip
+setuptools
+
+# ---- 2DGS Environment (2dgs) ----
+# pip install -e submodules/diff-surfel-rasterization
+# pip install -e submodules/simple-knn
+open3d
+mediapy
+lpips
+scikit-image
+tqdm
+trimesh
+tensorboard
+wandb
+swanlab
+
+# ---- Threestudio Environment (threestudio) ----
+lightning==2.0.0
+omegaconf==2.3.0
+jaxtyping
+typeguard
+diffusers==0.19.3
+transformers==4.28.1
+accelerate
+xformers==0.0.20
+bitsandbytes
+sentencepiece
+safetensors
+huggingface_hub==0.23.5
+einops
+kornia
+taming-transformers-rom1504
+open-clip-torch
+controlnet_aux
+nerfacc==0.5.2
+# nvdiffrast @ git+https://github.com/NVlabs/nvdiffrast.git  # installed manually with --no-build-isolation
+envlight==0.1.0
+libigl
+xatlas
+pysdf
+PyMCubes
+torchmetrics
+
+# ---- Magic123 Environment (magic123) ----
+diffusers==0.17.1
+rembg
+carvekit-colab
+onnxruntime
+pymatting
+pooch
+timm
+easydict
+termcolor
+torch-ema
+torchmetrics
+rich
+dearpygui
+taming-transformers-rom1504
+gdown
+pymeshlab
+
+# ---- COLMAP (system) ----
+# colmap (via apt or conda-forge)
+# pycolmap (pip)

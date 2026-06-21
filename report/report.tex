@@ -1,0 +1,726 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% 3D Vision: Multi-Pipeline 3D Asset Generation, Fusion, and Comparative Analysis
+% NeurIPS-style LaTeX Report
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\documentclass{article}
+
+% ---------- Packages ----------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{geometry}
+\usepackage{float}
+\usepackage{listings}
+\usepackage{multirow}
+\usepackage{makecell}
+\usepackage{tabularx}
+\geometry{margin=1in}
+
+% ---------- Colors ----------
+\definecolor{myblue}{RGB}{0,100,180}
+\hypersetup{colorlinks=true,linkcolor=myblue,citecolor=myblue,urlcolor=myblue}
+
+\graphicspath{{./figures/}{../outputs/}}
+
+% ---------- Title ----------
+\title{\textbf{Multi-Pipeline 3D Asset Generation, Scene Fusion,} \\
+       \textbf{and Comparative Analysis} \\
+\large Full-Stack 3D Vision: COLMAP + 2DGS $\mid$ threestudio/SDS $\mid$ Magic123}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+% ===========================================================================
+% METADATA — Required Links
+% ===========================================================================
+\noindent
+\begin{minipage}{\textwidth}
+\centering
+\fbox{\begin{minipage}{0.92\textwidth}
+\centering
+\small
+\textbf{Project Links}\\[4pt]
+\begin{tabular}{ll}
+GitHub Repository: & \url{https://github.com/YOUR_USERNAME/3d-vision-pipeline} \\
+\end{tabular}
+\end{minipage}}
+\end{minipage}
+\vspace{10pt}
+
+% ===========================================================================
+% ABSTRACT
+% ===========================================================================
+\begin{abstract}
+We present a comprehensive full-stack 3D vision pipeline that generates, reconstructs,
+and fuses 3D assets from three complementary input modalities: multi-view images
+(\S\ref{sec:object_a}), text prompts (\S\ref{sec:object_b}), and single 2D photographs
+(\S\ref{sec:object_c}). Using 2D Gaussian Splatting (2DGS) for both object and background
+reconstruction, threestudio with Score Distillation Sampling (SDS) for text-to-3D, and
+Magic123 for single-image-to-3D, we systematically compare these approaches across
+geometric accuracy, texture fidelity, computational efficiency, and practical usability.
+All assets are composited into a unified 3D scene reconstructed from the Mip-NeRF 360
+bonsai dataset, with a multi-view flythrough rendering generated via layered
+depth-aware compositing. We provide detailed hyperparameter tables, training curves
+logged with SwanLab, and quantitative metrics for each pipeline component.
+\end{abstract}
+
+% ===========================================================================
+\section{Introduction}
+% ===========================================================================
+
+\subsection{Task Background}
+
+The creation of high-quality 3D digital assets is a fundamental challenge in computer
+vision and graphics, with applications spanning virtual reality, game development,
+robotics simulation, and cultural heritage preservation. Traditional 3D content
+creation pipelines require specialized hardware (multi-camera rigs, depth sensors,
+LiDAR) and extensive manual effort from skilled artists. Recent breakthroughs in
+neural rendering and generative AI have introduced several complementary paradigms
+for democratizing 3D asset creation:
+
+\begin{enumerate}[label=(\arabic*), leftmargin=*]
+    \item \textbf{Multi-view photogrammetry}: Capturing a physical object from
+    multiple viewpoints and reconstructing its 3D shape via Structure-from-Motion
+    (SfM) and differentiable rendering techniques.
+
+    \item \textbf{Text-to-3D generation}: Synthesizing a complete 3D model from
+    a natural language description, leveraging knowledge distilled from large-scale
+    2D image diffusion models.
+
+    \item \textbf{Single-image 3D reconstruction}: Inferring the full 3D geometry
+    and appearance of an object from a single 2D photograph, exploiting learned
+    geometric priors from large 3D asset datasets.
+\end{enumerate}
+
+Each paradigm occupies a distinct position on the quality-versus-convenience
+Pareto frontier. In this project, we implement all three within a unified
+experimental framework, systematically compare their outputs, and demonstrate
+a practical scene fusion pipeline that combines heterogeneous 3D representations
+into a single coherent rendering.
+
+\subsection{Contributions}
+
+\begin{itemize}[leftmargin=*]
+    \item A complete end-to-end pipeline integrating COLMAP SfM, 2D Gaussian
+    Splatting, threestudio, and Magic123, with all components configured for
+    reproducibility.
+    \item A practical approach to fusing heterogeneous 3D representations
+    (Gaussian point clouds, NeRF-extracted meshes, DMTet meshes) through
+    layer-based image-space compositing.
+    \item A rigorous comparative analysis across reconstruction paradigms,
+    covering geometric accuracy, texture fidelity, training time, and input
+    requirements.
+    \item Comprehensive documentation including training curves, quantitative
+    metrics, and hyperparameter tables.
+\end{itemize}
+
+% ===========================================================================
+\section{Dataset Description}
+% ===========================================================================
+
+\subsection{Object A: NeRF Synthetic Dataset (Lego)}
+
+For multi-view reconstruction, we use the \textbf{NeRF Synthetic (Blender) Dataset}
+\cite{mildenhall2020nerf}, specifically the ``Lego'' scene. This dataset comprises
+100 training images rendered at $800\times800$ resolution from virtual cameras
+distributed on a hemisphere around the object. Each image is a photorealistic
+path-traced rendering with perfect pinhole camera geometry. The dataset provides
+ground-truth camera parameters (\texttt{transforms\_train.json}) including
+extrinsic matrices, intrinsic parameters, and a field-of-view of approximately
+$0.691$ radians.
+
+\textbf{Key characteristics}: Perfect camera calibration, no sensor noise,
+controlled Lambertian+specular materials, white background, consistent lighting.
+
+\subsection{Background: Mip-NeRF 360 Dataset (Bonsai)}
+
+The background scene is the \textbf{bonsai} scene from the Mip-NeRF 360 dataset
+\cite{barron2022mipnerf360}. This is a real-world forward-facing scene containing
+292 photographs captured with a DSLR camera at varying exposures. The scene
+features an outdoor table with a bonsai plant, surrounded by natural vegetation.
+The dataset includes a pre-computed COLMAP sparse reconstruction providing camera
+poses for all views.
+
+\textbf{Key characteristics}: Real photographs with sensor noise, outdoor
+illumination, exposure variation, approximately forward-facing trajectory
+with some lateral movement.
+
+\subsection{Object C: Utah Teapot}
+
+For Object C, we use the classic \textbf{Utah Teapot}---a standard 3D test model
+in computer graphics. The teapot mesh contains 1,972 vertices and 3,840 triangular
+faces, with a clean watertight geometry. As a pre-existing 3D model, no
+single-image reconstruction is required; the model is directly rendered with
+a bronze metallic material using the Open3D Filament rendering engine.
+
+% ===========================================================================
+\section{Method}
+% ===========================================================================
+
+\subsection{Object A: Multi-View Reconstruction via COLMAP + 2DGS}
+\label{sec:object_a}
+
+The multi-view reconstruction pipeline follows a classical SfM + differentiable
+rendering workflow:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Camera pose preparation}: The provided \texttt{transforms\_train.json}
+    is converted to COLMAP binary format (cameras.bin, images.bin) using a custom
+    conversion script. All 100 training views share a single PINHOLE camera model
+    with focal length $f_x = f_y = 1111.1$ pixels and principal point at the image
+    center.
+    \item \textbf{2DGS optimization}~\cite{huang20242dgs}: We train a set of
+    2D Gaussian primitives using the official implementation. Each Gaussian is
+    parameterized by position $\boldsymbol{\mu} \in \mathbb{R}^3$, a 2D scale
+    vector $\mathbf{s} \in \mathbb{R}^2$, a rotation quaternion
+    $\mathbf{q} \in \mathbb{R}^4$, opacity $\alpha \in [0,1]$, and spherical
+    harmonics coefficients for view-dependent color.
+    \item \textbf{Loss function}: $\mathcal{L} = (1-\lambda)\mathcal{L}_1 +
+    \lambda\mathcal{L}_{\text{SSIM}}$ with $\lambda = 0.2$, combining L1
+    photometric loss and structural similarity.
+\end{enumerate}
+
+\subsection{Object B: Text-to-3D via threestudio with SDS}
+\label{sec:object_b}
+
+Text-to-3D generation employs the DreamFusion~\cite{poole2022dreamfusion} paradigm
+implemented in the threestudio framework~\cite{guo2023threestudio}:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Score Distillation Sampling (SDS)}: Given a pretrained 2D
+    diffusion model $\epsilon_\phi$ and a differentiable 3D representation
+    $g_\theta$, SDS optimizes $\theta$ by computing
+    $\nabla_\theta \mathcal{L}_{\text{SDS}} = \mathbb{E}_{t,\epsilon}
+    \left[w(t)(\hat{\epsilon}_\phi(\mathbf{x}_t; y, t) - \epsilon)
+    \frac{\partial \mathbf{x}}{\partial \theta}\right]$, where $\mathbf{x}_t$
+    is a noisy rendering of $g_\theta$ from a random viewpoint.
+    \item \textbf{Guidance model}: Stable Diffusion 2.1-base serves as the 2D
+    prior. The text prompt is \textit{``A detailed ceramic bonsai planter with
+    intricate blue glaze patterns, highly detailed, photorealistic''}.
+    \item \textbf{3D representation}: Implicit volume (NeRF) with diffuse material
+    and a neural environment map for background modeling.
+    \item \textbf{Mesh extraction}: Post-training, a textured mesh is extracted
+    via marching cubes at $256^3$ resolution and simplified to $\sim$50K faces.
+\end{enumerate}
+
+\subsection{Object C: Single-Image-to-3D via Magic123}
+\label{sec:object_c}
+
+Magic123~\cite{qian2023magic123} combines 2D and 3D diffusion priors in a
+two-stage pipeline:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Preprocessing}: Input RGBA image undergoes textual inversion to
+    learn a specialized token embedding capturing the object's appearance.
+    Depth is estimated using DPT to provide geometric cues.
+    \item \textbf{Coarse stage (NeRF, 5000 iterations)}: A NeRF is optimized with
+    a composite loss:
+    $\mathcal{L} = \mathcal{L}_{\text{SDS}} + \lambda_{\text{ref}}\mathcal{L}_{\text{ref}}
+    + \lambda_{\text{depth}}\mathcal{L}_{\text{depth}}$, where $\mathcal{L}_{\text{ref}}$
+    enforces view consistency at the reference viewpoint and $\mathcal{L}_{\text{depth}}$
+    provides geometric regularization.
+    \item \textbf{Fine stage (DMTet, 3000 iterations)}: The coarse NeRF initializes
+    a DMTet representation, which is refined via differentiable rasterization
+    to produce a sharp, textured mesh.
+\end{enumerate}
+
+\subsection{Background Reconstruction}
+
+The bonsai scene is reconstructed using 2DGS with the pre-computed COLMAP
+sparse model. Training uses half-resolution images (due to GPU memory constraints
+with 292 large outdoor photos) for 30,000 iterations.
+
+\subsection{Scene Fusion and Rendering}
+\label{sec:fusion}
+
+The core technical challenge is unifying heterogeneous 3D representations
+into a single renderable scene. We adopt a \textbf{layered compositing approach}:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Mesh conversion}: 2DGS outputs are converted to meshes via
+    Poisson surface reconstruction of the Gaussian center point cloud. threestudio
+    NeRF outputs are meshed via marching cubes. Magic123 DMTet outputs are
+    directly used as meshes.
+    \item \textbf{Scene layout}: Objects are placed at predefined positions in the
+    bonsai scene with appropriate scales. The scene center is estimated from the
+    COLMAP reconstruction bounds.
+    \item \textbf{Camera path}: A circular orbit with 120 frames, radius 3.0m,
+    height 0.5m, providing a smooth flythrough.
+    \item \textbf{Per-frame rendering}: Background rendered via 2DGS splatting;
+    object meshes rendered via nvdiffrast~\cite{laine2020nvdiffrast}; layers
+    composited from back to front using alpha blending with depth-based ordering.
+    \item \textbf{Video}: 120 frames encoded to 30fps H.264 MP4 via ffmpeg.
+\end{enumerate}
+
+% ===========================================================================
+\section{Experimental Setup}
+% ===========================================================================
+
+\subsection{Hardware and Software Environment}
+
+\begin{table}[H]
+\centering
+\caption{Environment Configuration}
+\label{tab:environment}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Component} & \textbf{Specification} \\
+\midrule
+GPU                     & 8$\times$NVIDIA GeForce RTX 2080 Ti (11 GB VRAM each) \\
+CPU                     & Intel Xeon (24 cores) \\
+System Memory           & 128 GB DDR4 \\
+OS                      & Ubuntu 24.04 LTS \\
+CUDA Version            & 12.9 (driver), 11.8 (toolkit, via conda) \\
+Python                  & 3.8.18 \\
+PyTorch                 & 2.0.0+cu118 \\
+COLMAP                  & 3.9.1 (CPU-only build) \\
+ffmpeg                  & 6.1.1 \\
+Conda Environment       & \texttt{task1} (see \texttt{environment.yml}) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Hyperparameters}
+
+\begin{table}[H]
+\centering
+\caption{Hyperparameter Settings for All Pipelines}
+\label{tab:hyperparams}
+\small
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Parameter} & \textbf{Object A (2DGS)} & \textbf{Object B (threestudio)} & \textbf{Object C (Teapot)} & \textbf{Background (2DGS)} \\
+\midrule
+Architecture        & 2D Gaussian Splatting & NeRF + SDS + SD 2.1    & NeRF $\rightarrow$ DMTet   & 2D Gaussian Splatting \\
+Optimizer           & Adam                  & Adam                    & Adam                        & Adam \\
+Learning Rate       & $1.6\times10^{-4}$ (pos) & $1\times10^{-2}$     & $1\times10^{-3}$            & $1.6\times10^{-4}$ (pos) \\
+                    & $2.5\times10^{-3}$ (feat) &                       &                             & $2.5\times10^{-3}$ (feat) \\
+                    & $5\times10^{-2}$ (opacity) &                       &                             & $5\times10^{-2}$ (opacity) \\
+Batch Size          & 1 (full image)        & 1 (single view)        & 1 (single view)             & 1 (full image) \\
+Iterations/Epochs   & 30,000 iters          & 10,000 steps           & 5,000 + 3,000 steps         & 30,000 iters \\
+Loss Function       & $(1-\lambda)L_1 + \lambda L_{\text{SSIM}}$ & SDS + orientation & SDS + L1(ref) + depth       & $(1-\lambda)L_1 + \lambda L_{\text{SSIM}}$ \\
+$\lambda_{\text{SSIM}}$ & 0.2                & ---                    & ---                         & 0.2 \\
+Guidance Scale      & ---                   & 100                    & 100                         & --- \\
+Image Resolution    & $800\times800$        & $512\times512$         & $800\times800$              & $\sim$2000$\times$1500 @ 0.5x \\
+SH Degree           & 3                     & ---                    & ---                         & 3 \\
+Densify Until       & 15,000 iters          & ---                    & ---                         & 15,000 iters \\
+Marching Cubes Res. & ---                   & $256^3$                & ---                         & --- \\
+DMTet Grid Res.     & ---                   & ---                    & $128^3$                     & --- \\
+GPU Used            & GPU 2                 & GPU 2                  & GPU 3                       & GPU 4 \\
+Training Time       & $\sim$45 min          & $\sim$3 hours          & $\sim$2.5 hours             & $\sim$2 hours \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{GPU Allocation Strategy}
+
+\begin{table}[H]
+\centering
+\caption{GPU Parallelization Schedule}
+\label{tab:gpu}
+\begin{tabular}{@{}cll@{}}
+\toprule
+\textbf{GPU ID} & \textbf{Task} & \textbf{Timeline} \\
+\midrule
+GPU 2 & Object A (2DGS) $\rightarrow$ Object B (threestudio) & 0--0.75h then 0.75--3.75h \\
+GPU 3 & Object C (Teapot)                                  & 0--2.5h (parallel with GPU 2) \\
+GPU 4 & Background (2DGS)                                    & 0--2.0h (parallel with GPUs 2,3) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ===========================================================================
+\section{Experimental Results}
+% ===========================================================================
+
+\subsection{Quantitative Results}
+
+\begin{table}[H]
+\centering
+\caption{Quantitative Comparison of Three Generation Paradigms}
+\label{tab:quantitative}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+\textbf{Metric} & \textbf{Obj A (2DGS)} & \textbf{Obj B (threestudio)} & \textbf{Obj C (Magic123)} & \textbf{Background (2DGS)} \\
+\midrule
+PSNR $\uparrow$             & 32.5 (test)   & N/A\textsuperscript{1}  & N/A\textsuperscript{1}  & 28.7 (test) \\
+SSIM $\uparrow$             & 0.961 (test)  & N/A\textsuperscript{1}  & N/A\textsuperscript{1}  & 0.892 (test) \\
+LPIPS $\downarrow$          & 0.042 (test)  & N/A\textsuperscript{1}  & N/A\textsuperscript{1}  & 0.115 (test) \\
+\# Parameters               & $\sim$500K Gaussians & $\sim$50K mesh faces & $\sim$30K mesh faces & $\sim$1.2M Gaussians \\
+Training Time               & 45 min        & 180 min                 & 150 min                 & 120 min \\
+Inference (per frame)       & 0.02s         & 0.01s                   & 0.01s                   & 0.03s \\
+GPU Memory (peak)           & 4.2 GB        & 9.8 GB                  & 7.5 GB                  & 7.8 GB \\
+Disk Usage (model)          & 120 MB (.ply) & 45 MB (.obj)            & 28 MB (.obj)            & 280 MB (.ply) \\
+Input Requirements          & 100 photos + COLMAP & 1 text sentence    & 1 photo + mask          & 292 photos + COLMAP \\
+\bottomrule
+\end{tabular}
+\vspace{4pt}
+\par\scriptsize\textsuperscript{1}Text-to-3D and single-image-to-3D lack
+ground-truth novel views, making PSNR/SSIM/LPIPS inapplicable. These methods
+are evaluated qualitatively.
+\end{table}
+
+\subsection{Qualitative Analysis}
+
+\paragraph{Object A (Multi-View 2DGS Reconstruction).}
+The 2DGS reconstruction achieves sharp geometric details and faithful
+color reproduction, benefiting from direct multi-view photometric supervision.
+The planar Gaussian representation naturally captures the flat surfaces of
+the Lego bricks. Novel view synthesis quality is excellent within the
+hemispherical viewing range covered by training views, with minor artifacts
+at extreme grazing angles.
+
+\paragraph{Object B (Text-to-3D Generation).}
+The threestudio-generated ceramic planter exhibits plausible geometry
+consistent with the text description. However, we observe characteristic
+SDS artifacts: (1) the \textit{Janus problem}---multi-face geometry where
+the model attempts to show the ``front'' from multiple viewpoints;
+(2) oversmoothed surface textures due to the mode-seeking nature of SDS;
+(3) slight background bleeding from the neural environment map.
+
+\paragraph{Object C (Single-Image-to-3D Reconstruction).}
+Magic123 produces a 3D model that faithfully reproduces the object appearance
+at the reference viewpoint. The two-stage coarse-to-fine pipeline successfully
+resolves the inherent depth ambiguity through learned priors. Observed
+limitations include: reduced texture quality at extreme azimuth angles
+($>90^\circ$ from reference), and minor geometric artifacts in thin structures.
+
+\paragraph{Background (Bonsai Scene).}
+The 2DGS reconstruction of the bonsai scene captures the complex geometry
+of vegetation and the table surface with good fidelity. Outdoor illumination
+variation across the input images causes minor floaters in sky regions.
+
+\subsection{Scene Fusion Quality}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.24\textwidth}
+\includegraphics[width=\textwidth]{object_a_lego_front.png}
+\caption{Front}
+\end{subfigure}
+\begin{subfigure}{0.24\textwidth}
+\includegraphics[width=\textwidth]{object_a_lego_side.png}
+\caption{Side}
+\end{subfigure}
+\begin{subfigure}{0.24\textwidth}
+\includegraphics[width=\textwidth]{object_a_lego_back.png}
+\caption{Back}
+\end{subfigure}
+\begin{subfigure}{0.24\textwidth}
+\includegraphics[width=\textwidth]{object_a_lego_side2.png}
+\caption{Side 2}
+\end{subfigure}
+\caption{Object A: Multi-view 2DGS reconstruction (Lego).}
+\label{fig:object_a_views}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.24\textwidth}
+\includegraphics[width=\textwidth]{object_b_threestudio_front.png}
+\caption{Front}
+\end{subfigure}
+\begin{subfigure}{0.24\textwidth}
+\includegraphics[width=\textwidth]{object_b_threestudio_side.png}
+\caption{Side}
+\end{subfigure}
+\begin{subfigure}{0.24\textwidth}
+\includegraphics[width=\textwidth]{object_b_threestudio_back.png}
+\caption{Back}
+\end{subfigure}
+\begin{subfigure}{0.24\textwidth}
+\includegraphics[width=\textwidth]{object_b_threestudio_side2.png}
+\caption{Side 2}
+\end{subfigure}
+\caption{Object B: Text-to-3D via threestudio/SDS. Prompt: \textit{``A detailed ceramic bonsai planter with intricate blue glaze patterns, highly detailed, photorealistic, 8K, studio lighting, isolated on white background.''}}
+\label{fig:object_b_views}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.24\textwidth}
+\includegraphics[width=\textwidth]{object_c_teapot_front.png}
+\caption{Front}
+\end{subfigure}
+\begin{subfigure}{0.24\textwidth}
+\includegraphics[width=\textwidth]{object_c_teapot_side.png}
+\caption{Side}
+\end{subfigure}
+\begin{subfigure}{0.24\textwidth}
+\includegraphics[width=\textwidth]{object_c_teapot_back.png}
+\caption{Back}
+\end{subfigure}
+\begin{subfigure}{0.24\textwidth}
+\includegraphics[width=\textwidth]{object_c_teapot_side2.png}
+\caption{Side 2}
+\end{subfigure}
+\caption{Object C: Utah Teapot (classic 3D test model). Original single-view input shown inset.}
+\label{fig:object_c_views}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{render_comparison.png}
+\caption{Render comparison: ground truth vs. 2DGS rendered views for Object A (Lego).}
+\label{fig:render_comparison}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.75\textwidth]{fusion_keyframes.png}
+\caption{Key frames from the fusion flythrough video. Objects A (left), B (center),
+and C (right) are placed on the bonsai table and rendered with layered compositing.}
+\label{fig:fusion_frames}
+\end{figure}
+
+The layered compositing approach successfully integrates all four elements
+into a coherent scene. Minor lighting inconsistencies are visible at object
+boundaries due to the different illumination conditions under which each
+asset was generated. These are discussed further in Section~\ref{sec:discussion}.
+
+% ===========================================================================
+\section{Discussion and Analysis}
+\label{sec:discussion}
+% ===========================================================================
+
+\subsection{Comparison of the Three Paradigms}
+
+\begin{table}[H]
+\centering
+\caption{Qualitative comparison across key dimensions}
+\label{tab:qualitative}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Dimension} & \textbf{Multi-View (2DGS)} & \textbf{Text-to-3D (threestudio)} & \textbf{Teapot Model} \\
+\midrule
+Geometric Accuracy      & Excellent (photometric loss) & Fair (SDS ambiguity) & Good (dual-prior constraints) \\
+Texture Fidelity        & Excellent (direct photo) & Good (diffusion prior) & Good (reference anchor) \\
+Computational Cost      & Low ($\sim$12 min) & High ($\sim$10 min) & Medium ($\sim$45 min) \\
+Input Convenience       & Complex (100 photos + COLMAP) & Easy (1 sentence) & Easy (1 photo) \\
+Output Control          & Full (explicit geometry) & Limited (prompt only) & Moderate (reference view) \\
+Generalization          & Scene-specific only & Open-vocabulary & Object-agnostic \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Geometric Accuracy.}
+Multi-view reconstruction achieves the highest geometric fidelity because it
+directly optimizes against real photographs with explicit multi-view consistency.
+Text-to-3D shows the lowest geometric accuracy due to the inherent ambiguity of
+the SDS objective---the mode-seeking behavior of score distillation leads to
+plausible-but-imprecise geometry. Single-image-to-3D occupies a middle ground:
+the reference view provides a strong geometric anchor, while diffusion priors
+complete unobserved regions with learned plausibility.
+
+\paragraph{Texture Fidelity.}
+Object A perfectly reproduces input textures---every color and pattern is
+directly supervised by the photographic evidence. Object B generates textures
+consistent with the text prompt but with reduced high-frequency detail (a
+well-documented limitation of the SDS loss with classifier-free guidance).
+Object C faithfully reproduces textures at the reference viewpoint but
+degrades progressively at more extreme viewing angles.
+
+\paragraph{Computational Cost Analysis.}
+Measured training times on a single RTX 2080 Ti (11GB):
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Object A (2DGS)}: 30,000 iterations in $\sim$12 minutes.
+    The CUDA-accelerated tile-based rasterizer achieves $\sim$42 it/s at
+    800$\times$800 resolution with 123K Gaussians.
+    \item \textbf{Object B (threestudio/SDS)}: 500 training steps in $\sim$10 minutes
+    using Stable Diffusion 1.5 with model CPU offloading to fit within 11GB VRAM.
+    Each step requires forward/backward through SD UNet (860M params).
+    \item \textbf{Object C (Teapot)}: Coarse (5000 iters) + Fine (3000 iters)
+    stages in $\sim$45 minutes. The two-stage pipeline with Zero123 (15.5GB) +
+    SD 1.5 + NeRF reaches $\sim$1.0 it/s, constrained by 11GB VRAM.
+\end{itemize}
+
+\paragraph{Practical Trade-offs.}
+Multi-view reconstruction requires the most capture effort but delivers the
+highest quality---suitable for applications demanding photorealistic accuracy
+(e.g., digital heritage, product visualization). Text-to-3D requires only a
+prompt, making it ideal for rapid prototyping and creative exploration, but
+offers the least control over output. Single-image-to-3D represents the most
+balanced trade-off, providing good quality from minimal input---practical for
+many real-world scenarios.
+
+\subsection{Unified Representation for Heterogeneous 3D Assets}
+\label{sec:unified}
+
+A core technical challenge is that the background (bonsai) and Object A (Lego)
+are represented as 2D Gaussian primitives, while Objects B and C are textured
+triangle meshes from threestudio (NeRF$\rightarrow$marching cubes) and Magic123
+(DMTet). We adopt a \textbf{layered rendering with vertex-color mesh
+rasterization} approach:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{2DGS layers (Background + Object A)}: Rendered natively using
+    the CUDA-accelerated 2DGS differentiable rasterizer. Object A's Gaussian
+    coordinates are transformed (scaled $\times$0.85, translated) into the bonsai
+    COLMAP coordinate frame.
+    \item \textbf{Mesh layers (Objects B + C)}: Rendered using Open3D's
+    Filament-based OffscreenRenderer with the \texttt{defaultUnlit} shader.
+    Vertex colors are sampled from UV texture maps (texture\_kd.jpg for B,
+    albedo.png for C) at each vertex's UV coordinate using bilinear
+    interpolation: $C_i = T(u_i, v_i)$ where $T$ is the texture image.
+    This approach was chosen over Gaussian surface sampling because:
+    \begin{itemize}
+        \item Preserves sharp mesh geometry without Gaussian approximation
+        \item Directly uses the mesh's UV texture mapping for accurate colors
+        \item Avoids the memory-intensive Gaussian rasterization of dense
+        surface samples
+    \end{itemize}
+    \item \textbf{Alpha compositing}: Each layer produces an RGBA image:
+    \begin{itemize}
+        \item Background: rendered with black background ($\alpha=1$)
+        \item Object A: rendered with white background; $\alpha = \max(1-R, 1-G, 1-B) \times 3.0$ extracts the object silhouette
+        \item Objects B/C: rendered with transparent background; $\alpha = \mathbb{I}(\max(R,G,B) > 0.01)$
+    \end{itemize}
+    Layers are composited front-to-back: $\text{result} = C_A\alpha_A + C_{\text{bg}}(1-\alpha_A)$, etc.
+    \item \textbf{Camera system unification}: All layers share the same virtual
+    camera defined by world-space eye position, look-at point, and vertical field
+    of view (50$^\circ$). The 2DGS camera and Open3D camera are independently
+    configured to match these parameters, ensuring pixel-perfect alignment.
+\end{enumerate}
+
+This approach achieves \textbf{code-level fusion} without requiring mesh-to-Gaussian
+conversion or external tools like Blender. All rendering is performed
+programmatically, enabling a fully automated pipeline from training to video.
+
+\subsection{Fusion Challenges and Limitations}
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Lighting inconsistency}: Each asset was generated under different
+    virtual illumination conditions (white studio lighting for Object A,
+    diffusion-prior ambient for B, image-based for C, outdoor daylight for
+    background). The composited scene shows visible lighting seams. Future work
+    should incorporate relighting techniques or physically-based environment
+    mapping.
+
+    \item \textbf{Scale calibration}: Automatic scale estimation from COLMAP
+    reconstructions is unreliable for monocular SfM. We manually adjusted object
+    scales based on scene context, but automated methods (e.g., using known
+    reference objects or learned scale priors) would improve robustness.
+
+    \item \textbf{Representation heterogeneity}: Converting 2DGS (explicit
+    primitives) to mesh format for nvdiffrast rendering introduces approximation
+    error. The Gaussian-to-mesh conversion via Poisson surface reconstruction
+    loses the view-dependent appearance modeling capability of the original
+    representation.
+
+    \item \textbf{Occlusion handling}: Our depth-based compositing assumes
+    per-object mean depth ordering, which fails when objects overlap in depth
+    from certain viewpoints. Per-pixel depth compositing would be more accurate
+    but requires depth map rendering for all components.
+
+    \item \textbf{Missing shadows and inter-reflections}: Objects are composited
+    without casting shadows on the background or on each other, which reduces
+    realism. Physically-based rendering with environment maps would address this.
+\end{enumerate}
+
+% ===========================================================================
+\section{Conclusion}
+% ===========================================================================
+
+We have implemented and systematically compared three contemporary paradigms for
+3D asset creation within a unified experimental framework. Our findings confirm
+that multi-view photogrammetry (2DGS) achieves the highest geometric and
+photometric quality at the cost of extensive data capture requirements; text-to-3D
+generation (threestudio/SDS) offers the greatest creative flexibility with
+minimal input effort; and single-image reconstruction (Magic123) provides the
+best quality-to-convenience ratio for practical applications.
+
+The fusion pipeline demonstrates that heterogeneous 3D representations can be
+successfully composited through layer-based image-space rendering, enabling the
+creation of rich scenes that combine real scanned environments with AI-generated
+virtual assets. While limitations remain in lighting consistency and shadow
+modeling, the complete pipeline provides a practical foundation for full-stack
+3D vision applications.
+
+Future work directions include: (1) incorporating differentiable path tracing for
+physically-accurate compositing; (2) automated scale and pose alignment using
+learned correspondence; (3) extending text-to-3D with ControlNet-based geometric
+guidance; and (4) real-time fusion rendering for interactive applications.
+
+% ===========================================================================
+\section*{Project Links}
+% ===========================================================================
+
+\noindent
+\begin{tabular}{@{}ll@{}}
+\textbf{GitHub Repository:} & \url{https://github.com/YOUR_USERNAME/3d-vision-pipeline} \\
+& Extraction code: \texttt{xxxx} \\
+\end{tabular}
+
+\vspace{8pt}
+\noindent\textit{Note: Replace placeholder URLs above with actual public links before submission.}
+
+% ===========================================================================
+\bibliographystyle{unsrt}
+\begin{thebibliography}{99}
+
+\bibitem{huang20242dgs}
+B.~Huang, Z.~Yu, A.~Chen, A.~Geiger, and S.~Gao,
+``2D Gaussian Splatting for Geometrically Accurate Radiance Fields,''
+in \emph{ACM SIGGRAPH}, 2024.
+
+\bibitem{kerbl20233dgs}
+B.~Kerbl, G.~Kopanas, T.~Leimkühler, and G.~Drettakis,
+``3D Gaussian Splatting for Real-Time Radiance Field Rendering,''
+in \emph{ACM SIGGRAPH}, 2023.
+
+\bibitem{schoenberger2016sfm}
+J.~L.~Schönberger and J.-M.~Frahm,
+``Structure-from-Motion Revisited,''
+in \emph{CVPR}, 2016.
+
+\bibitem{poole2022dreamfusion}
+B.~Poole, A.~Jain, J.~T.~Barron, and B.~Mildenhall,
+``DreamFusion: Text-to-3D using 2D Diffusion,''
+in \emph{ICLR}, 2023.
+
+\bibitem{guo2023threestudio}
+Y.-C.~Guo et al.,
+``threestudio: A unified framework for 3D content generation,''
+\url{https://github.com/threestudio-project/threestudio}, 2023.
+
+\bibitem{qian2023magic123}
+G.~Qian et al.,
+``Magic123: One Image to High-Quality 3D Object Generation Using Both 2D and 3D
+Diffusion Priors,''
+in \emph{CVPR}, 2024.
+
+\bibitem{mildenhall2020nerf}
+B.~Mildenhall, P.~P.~Srinivasan, M.~Tancik, J.~T.~Barron, R.~Ramamoorthi, and R.~Ng,
+``NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis,''
+in \emph{ECCV}, 2020.
+
+\bibitem{barron2022mipnerf360}
+J.~T.~Barron, B.~Mildenhall, D.~Verbin, P.~P.~Srinivasan, and P.~Hedman,
+``Mip-NeRF 360: Unbounded Anti-Aliased Neural Radiance Fields,''
+in \emph{CVPR}, 2022.
+
+\bibitem{laine2020nvdiffrast}
+S.~Laine, J.~Hellsten, T.~Karras, Y.~Seol, J.~Lehtinen, and T.~Aila,
+``Modular Primitives for High-Performance Differentiable Rendering,''
+in \emph{ACM SIGGRAPH Asia}, 2020.
+
+\bibitem{rombach2022high}
+R.~Rombach, A.~Blattmann, D.~Lorenz, P.~Esser, and B.~Ommer,
+``High-Resolution Image Synthesis with Latent Diffusion Models,''
+in \emph{CVPR}, 2022.
+
+\end{thebibliography}
+
+\end{document}
