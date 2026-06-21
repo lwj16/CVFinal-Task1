@@ -10,7 +10,7 @@ git clone https://github.com/lwj16/CVFinal-Task1.git
 cd CVFinal-Task1
 
 # 2. Download models from Google Drive
-#    https://drive.google.com/drive/folders/YOUR_LINK
+#    https://drive.google.com/drive/folders/1ZMRnu4ozgmy-LEtr2p2Ti3O2L5LiCT7J?usp=sharing
 #    Extract to models/:
 #      models/lego.ply        (29 MB)
 #      models/vase.obj        (8.1 MB)
